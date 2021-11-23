@@ -1,0 +1,198 @@
+# TODO:
+#   Seperate github for this project, bc its cool :)
+#   Figure out graphing coords on map of US
+
+# This file contains code that, when given a google maps route (provided as a
+#   URL), will determine the average amount of drive time per day to maintain
+#   full charge in your solar system's battery while still progressing along the
+#   route at the most liesurly pace possible.
+
+# If testing this locally, follow these steps:
+#   1. This project requires a number of packages.  You should have "requests",
+#       geos, and basemap installed. If you do not, try the following commands:
+#           'pip install requests' 
+#           'brew install geos'
+#           'pip3 install https://github.com/matplotlib/basemap/archive/master.zip'
+#       Note: These instructions probably only work on Linux/Macs.  
+#           I'm not sure about Windows
+#   2. Plot a route on google maps and copy the URL
+#       An example route from Pittsburgh to Washington DC is:
+#       https://www.google.com/maps/dir/Pittsburgh,+PA/Washington,+DC,+DC/@39.6690482,-79.6376097,8z/data=!3m1!4b1!4m14!4m13!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x89b7c6de5af6e45b:0xc2524522d4885d2a!2m2!1d-77.0368707!2d38.9071923!3e0
+#   3. From the command line, navigate to the folder containing this file.
+#   4. Run 'python project.py <URL>' replacing URL with your google maps route
+#       URL. No '<>' or quotes needed.  Just the URL as you copied it.
+#       Example: python project.py https://www.google.com/maps/dir/Pittsburgh,+PA/Washington,+DC,+DC/@39.6690482,-79.6376097,8z/data=!3m1!4b1!4m14!4m13!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x89b7c6de5af6e45b:0xc2524522d4885d2a!2m2!1d-77.0368707!2d38.9071923!3e0
+#       NOTE: You must have a Wifi connection to run this.  It pings google.com
+#
+#   This will output... TODO
+
+# NOTE: If you're running this from a bash shell and recieve an error 
+#     similar to "bash: !: event not found", you should run 'set +H' 
+#     from the command line.  Bash doesn't like all the pesky "!" in the
+#     metadata of the URL.
+#     Alternatively, just manually delete everything after "/data=" in 
+#     the URL to get rid of all the "!"
+#
+# If you have any other troubles running this, email me (Zayne Khouja)
+#   at zck@andrew.cmu.edu
+
+import requests
+import sys
+import math
+from mpl_toolkits.basemap import Basemap
+import matplotlib.pyplot as plt
+
+# I created a developer account for google's cloud services.  I will be using
+#   googles Geocoding API to convert named locations to their coordinates.
+# I believe anyone should be able to use this key as I have not restricted it
+# This key will expire on February 21, 2022
+GOOGLE_API_KEY = "AIzaSyA7CzmKB2lQpQl-RYVY9cjRriYcjFJJCg0"
+
+# Defines coordinate degree granularity. One coordinate degree is roughly 
+#   69 miles (111 km).  The below definition defines how far apart to place 
+#   additional coordinates along a route between two locations.  A lower number 
+#   will yield more granular data, but will take longer to compute. 
+# The unit of this value is lat/long degrees.  A value of 0.25 defines a
+#   coordinate roughly every 17 miles (28 km).
+INTERPOLATION_GRANULARITY = 0.25
+
+# Defines for plotting coordinates on the map
+BIG_DOT = 5
+SMALL_DOT = 2
+
+# Converts a given address (formatted as per a google URL's input) to its
+#   respective longitude and lattitude coordinate.
+def get_coordinates(addr):
+    lat, lng = None, None
+    base_url = "https://maps.googleapis.com/maps/api/geocode/json"
+    endpoint = f"{base_url}?address={addr}&key={GOOGLE_API_KEY}"
+
+    r = requests.get(endpoint)
+
+    if r.status_code not in range(200, 299):
+        print("\n*** Google API Response Error!")
+        print("*** Check URL formatting, or try again later (API may be down)\n\n")
+        quit()
+
+    results = r.json()['results'][0]
+    lat = results['geometry']['location']['lat']
+    lng = results['geometry']['location']['lng']
+   
+    return lat, lng
+
+
+
+# Given a Google maps route URL as input, resolves a list of coordinates for  
+#   the locations in the route
+def parse_url(url):
+    # Content between "https://www.google.com/maps/dir/" and "/@" represents
+    #   the locations of interest.  Rest is metadata that we don't care about
+    url = url.split("https://www.google.com/maps/dir/")[1]
+    url = url.split("/@")[0]
+
+    locations = url.split("/")
+    print("Parsed", str(len(locations)), "Locations:", str(locations), "\n")
+
+    coordinates = [get_coordinates(loc) for loc in locations]
+    print("Resolved",str(len(coordinates)), "coordinates as:", str(coordinates), "\n")
+    return coordinates
+
+
+
+# Groups adjacent coordinates into pairs to define legs of the route
+def build_pairs(coords):
+    print("Grouping", str(len(coords)), "locations into", str(len(coords) - 1), "pair(s)\n")
+    pairs = []
+    for i in range(len(coords)-1):
+        pairs.append((coords[i], coords[i+1]))
+    assert(len(pairs) == (len(coords) - 1))
+    return pairs
+
+
+
+# Given a list of coordinates, resolves a straight line between each adjacent 
+#   pair of points, then defines additional coordinates every __TODO__ degrees
+#   along the line.
+# This provides a degree of granularity in the irradiance calculations along
+#   the route.
+def interpolate(coord_pairs):
+    interpolated_coords = []
+    for ((x1, y1), (x2, y2)) in coord_pairs:
+        new_cords = [(x1, y1)]
+        dist = math.sqrt((x2 - x1)**2 + (y2 - y1)**2)
+        slope = (y2 - y1) / (x2 - x1)
+        num_coords = int((dist // INTERPOLATION_GRANULARITY) - 1)
+
+        # Will be roughly the same as INTERPOLATION_GRANULARITY, but not exact
+        #   because we want equally spaced points
+        coord_dist = dist / (num_coords + 1)
+
+        incremental_dist = coord_dist
+        for i in range(num_coords):
+            dist_ratio = incremental_dist / dist
+            new_x = ((1 - dist_ratio) * x1) + (dist_ratio * x2)
+            new_y = ((1 - dist_ratio) * y1) + (dist_ratio * y2)
+            new_cords.append((new_x, new_y))
+            incremental_dist = incremental_dist + coord_dist
+
+        new_cords.append((x2, y2))
+        interpolated_coords.append(new_cords)
+    return interpolated_coords
+
+
+# Given a list of (long, lat) coordinates that fall within the continental US, 
+#   plot them on a map!
+# Also allows plotting of a list of lists of coordinates (so I can call this
+#   with more flexible input types)
+# If plotting many points, use small dot_size (2).  Use 5 for fewer points
+def plot_coordinates(coords, dot_size):
+    # If given a list of lists, flatten it to a single list
+    if (any(isinstance(coord, list) for coord in coords)):
+        coords = [item for sublist in coords for item in sublist]
+
+    m = Basemap(llcrnrlon=-121,llcrnrlat=20,urcrnrlon=-62,urcrnrlat=51,
+        projection='lcc',lat_1=32,lat_2=45,lon_0=-95)
+    plt.figure(num=1,figsize=(9,7))
+    m.drawcoastlines()
+    m.drawstates()
+    m.drawcountries()
+    m.drawmapboundary(fill_color='paleturquoise')
+    m.fillcontinents(color='peachpuff',lake_color='paleturquoise')
+
+    for (lat, long) in coords:
+        (x, y) = m(long, lat)
+        m.plot(x,y,marker='o',color='Red',markersize=dot_size)
+
+    plt.show()
+
+
+# Main driver function to organize computations
+def driver(url):
+    coordinates = parse_url(url) 
+    plot_coordinates(coordinates, BIG_DOT)
+    coordinate_pairs = build_pairs(coordinates)
+    granular_coordinates = interpolate(coordinate_pairs)
+    plot_coordinates(granular_coordinates, SMALL_DOT)
+
+
+# Code to parse command-line arguments 
+if len(sys.argv) > 1:
+    print("=====")
+    driver(sys.argv[1])
+    print("Execution complete.")
+    print("=====")
+else:
+    print("=====\nNo arguments provided.")
+    print("Please supply the URL from a google maps route.")
+    print("Usage: python project.py <URL>\n=====")
+
+
+# Short route for testing
+"""
+https://www.google.com/maps/dir/Pittsburgh,+PA/Washington,+DC,+DC/@39.6690482,-79.6376097,8z/data=!3m1!4b1!4m14!4m13!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x89b7c6de5af6e45b:0xc2524522d4885d2a!2m2!1d-77.0368707!2d38.9071923!3e0
+"""
+
+# Long route for testing (part of my winter break return route)
+"""
+https://www.google.com/maps/dir/Pittsburgh,+PA/Hot+Springs+National+Park/Magazine+Mountain,+Arkansas/Petrified+Forest+National+Park/Mesa+Verde+National+Park,+Mesa+Verde,+CO/Capitol+Reef+National+Park,+Utah/Great+Basin+National+Park,+Nevada/Death+Valley,+CA/San+Jose,+CA/@36.1182533,-119.0157453,4z/data=!3m1!4b1!4m56!4m55!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x87cd2a4f3e14f595:0x582d6639762948dd!2m2!1d-93.0423545!2d34.5216915!1m5!1m1!1s0x87cc7df3a3deba49:0xa00510e07fa0fe9e!2m2!1d-93.6449152!2d35.167312!1m5!1m1!1s0x872f9b3e3ba72d9b:0xf026f23d8c8c2ecd!2m2!1d-109.78204!2d35.065931!1m5!1m1!1s0x873960bf2ed7711f:0x79f695a21bf61863!2m2!1d-108.4618335!2d37.2308729!1m5!1m1!1s0x874a00ff07e7a253:0xde3bec53484fff07!2m2!1d-111.1354983!2d38.0877312!1m5!1m1!1s0x80b15c25d7cc0d03:0x3cd4750fafbebd31!2m2!1d-114.2633787!2d38.9299798!1m5!1m1!1s0x80c739a21e8fffb1:0x1c897383d723dd25!2m2!1d-116.9325408!2d36.5322649!1m5!1m1!1s0x808fcae48af93ff5:0xb99d8c0aca9f717b!2m2!1d-121.8863286!2d37.3382082!3e0
+"""
