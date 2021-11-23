@@ -1,3 +1,5 @@
+# Used for testing the map plotting functionality.  
+
 from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
 import math
