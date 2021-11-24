@@ -1,7 +1,3 @@
-# TODO:
-#   Seperate github for this project, bc its cool :)
-#   Figure out graphing coords on map of US
-
 # This file contains code that, when given a google maps route (provided as a
 #   URL), will determine the average amount of drive time per day to maintain
 #   full charge in your solar system's battery while still progressing along the
@@ -12,7 +8,8 @@
 #       geos, and basemap installed. If you do not, try the following commands:
 #           'pip install requests' 
 #           'brew install geos'
-#           'pip3 install https://github.com/matplotlib/basemap/archive/master.zip'
+#           'pip install https://github.com/matplotlib/basemap/archive/master.zip'
+#           'pip install geopy'
 #       Note: These instructions probably only work on Linux/Macs.  
 #           I'm not sure about Windows
 #   2. Plot a route on google maps and copy the URL
@@ -41,6 +38,7 @@ import sys
 import math
 from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
+from geopy.geocoders import GoogleV3
 
 # I created a developer account for google's cloud services.  I will be using
 #   googles Geocoding API to convert named locations to their coordinates.
@@ -59,6 +57,10 @@ INTERPOLATION_GRANULARITY = 0.25
 # Defines for plotting coordinates on the map
 BIG_DOT = 5
 SMALL_DOT = 2
+
+# Standardizing the date and time to use for resolving irradiance
+# DATE = 
+# TIME = 
 
 # Converts a given address (formatted as per a google URL's input) to its
 #   respective longitude and lattitude coordinate.
@@ -166,13 +168,43 @@ def plot_coordinates(coords, dot_size):
     plt.show()
 
 
+# Uses Google's reverse geocoding API to obtain the state a coordinate lands in
+def reverse_geocode(coord):
+    (lat, long) = coord
+    geolocator = GoogleV3(api_key=GOOGLE_API_KEY)
+    location = geolocator.reverse(str(lat) + ", " + str(long))
+    if location:
+        loc = str(location[0])
+        loc = loc.split(", USA")[0]
+        loc = loc.split(", ")[-1]
+        return loc[:2]
+    else:
+        print("\n*** Reverse Geocoding API Response Error!")
+        print("*** Check coordinates, or try again later (API may be down)")
+        print("*** Coordinate must land within a USA State\n\n")
+        quit()
+
+
+# Unpacks a list of lists of coordinates and maps each to the US state it lands in
+def coords_to_states(coord_lists):
+    total_state_list = []
+    for coords in coord_lists:
+        single_state_list = []
+        for coord in coords:
+            single_state_list.append(reverse_geocode(coord))
+        total_state_list.append(single_state_list)
+    print("Resolved states for coordinates as:", str(total_state_list), "\n")
+    return total_state_list
+
 # Main driver function to organize computations
 def driver(url):
-    coordinates = parse_url(url) 
-    plot_coordinates(coordinates, BIG_DOT)
+    coordinates = parse_url(url)
+    # plot_coordinates(coordinates, BIG_DOT)
     coordinate_pairs = build_pairs(coordinates)
     granular_coordinates = interpolate(coordinate_pairs)
-    plot_coordinates(granular_coordinates, SMALL_DOT)
+    # plot_coordinates(granular_coordinates, SMALL_DOT)
+    state_map = coords_to_states(granular_coordinates)
+    # irradiance_map = state_to_irradiance(state_map, )
 
 
 # Code to parse command-line arguments 
@@ -186,6 +218,8 @@ else:
     print("Please supply the URL from a google maps route.")
     print("Usage: python project.py <URL>\n=====")
 
+
+# reverse_geocode()
 
 # Short route for testing
 """
