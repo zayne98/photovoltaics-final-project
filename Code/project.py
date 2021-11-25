@@ -10,6 +10,8 @@
 #           'brew install geos'
 #           'pip install https://github.com/matplotlib/basemap/archive/master.zip'
 #           'pip install geopy'
+#           'pip install us'
+#           'pip install reverse_geocoder'
 #       Note: These instructions probably only work on Linux/Macs.  
 #           I'm not sure about Windows
 #   2. Plot a route on google maps and copy the URL
@@ -39,6 +41,10 @@ import math
 from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
 from geopy.geocoders import GoogleV3
+import pandas as pd
+import reverse_geocoder
+import us
+
 
 # I created a developer account for google's cloud services.  I will be using
 #   googles Geocoding API to convert named locations to their coordinates.
@@ -59,8 +65,12 @@ BIG_DOT = 5
 SMALL_DOT = 2
 
 # Standardizing the date and time to use for resolving irradiance
-# DATE = 
-# TIME = 
+# Using the Date/Time with the highest irradiance (from Homework 1)
+# As an approximation for the lower bound of drive time
+# This represents July 1st
+MONTH = "7"
+DAY = "1"
+IRRADIANCE_PATH = "./irradiance.csv"
 
 # Converts a given address (formatted as per a google URL's input) to its
 #   respective longitude and lattitude coordinate.
@@ -169,20 +179,36 @@ def plot_coordinates(coords, dot_size):
 
 
 # Uses Google's reverse geocoding API to obtain the state a coordinate lands in
+# This sometimes returns google's "Plus Codes" for some reason, which don't 
+#   carry the state info annoyingly.  Another solution is in the function below
+# def reverse_geocode(coord):
+#     (lat, long) = coord
+#     geolocator = GoogleV3(api_key=GOOGLE_API_KEY)
+#     location = geolocator.reverse(str(lat) + ", " + str(long))
+#     if location:
+#         print(location.raw)
+#         loc = str(location[0])
+#         # print(loc)
+#         loc = loc.split(", USA")[0]
+#         loc = loc.split(", ")[-1]
+#         return loc[:2]
+#     else:
+#         print("\n*** Reverse Geocoding API Response Error!")
+#         print("*** Check coordinates, or try again later (API may be down)")
+#         print("*** Coordinate must land within a USA State\n\n")
+#         quit()
+
+
+# Uses the reverse_geocode library and the US state library to determine the
+#   state a coordinate lies in and then convert state name to state abbreviation
+# This solution is sadly slower than Google's API, but it is more reliable
 def reverse_geocode(coord):
-    (lat, long) = coord
-    geolocator = GoogleV3(api_key=GOOGLE_API_KEY)
-    location = geolocator.reverse(str(lat) + ", " + str(long))
-    if location:
-        loc = str(location[0])
-        loc = loc.split(", USA")[0]
-        loc = loc.split(", ")[-1]
-        return loc[:2]
+    coord_data = reverse_geocoder.search(coord)
+    state_name = us.states.lookup(coord_data[0]["admin1"])
+    if (state_name is None):
+        return "DC"
     else:
-        print("\n*** Reverse Geocoding API Response Error!")
-        print("*** Check coordinates, or try again later (API may be down)")
-        print("*** Coordinate must land within a USA State\n\n")
-        quit()
+        return state_name.abbr
 
 
 # Unpacks a list of lists of coordinates and maps each to the US state it lands in
@@ -196,6 +222,30 @@ def coords_to_states(coord_lists):
     print("Resolved states for coordinates as:", str(total_state_list), "\n")
     return total_state_list
 
+
+# Using a single date and time right now for simplicity purposes, but should
+#   be simple enough to build a dynamic time/date calculator for the 
+#   progression of a road trip
+# I select the maximum irradiance for each state (regardless of date), to 
+#   get a lower bound on drive time
+def state_to_irradiance(state_lists):
+    df = pd.read_csv(IRRADIANCE_PATH, header = 0, dtype={1: float, 2: float, 
+        3: float, 4: 'str'})
+    df['time'] =  pd.to_datetime(df['time'])
+
+    total_irrad_list = []
+    for states in state_lists:
+        single_irrad_list = []
+        for state in states:
+            state_df = df[df["state"] == state]
+            state_df = state_df.reset_index(drop=True)
+            irrad = state_df.iloc[state_df["irradiance_surface"].idxmax()]["irradiance_surface"]
+            single_irrad_list.append(irrad)
+        total_irrad_list.append(single_irrad_list)
+    print("Resolved irradiance values for states as:", str(total_irrad_list), "\n")
+    return total_irrad_list
+
+
 # Main driver function to organize computations
 def driver(url):
     coordinates = parse_url(url)
@@ -204,7 +254,7 @@ def driver(url):
     granular_coordinates = interpolate(coordinate_pairs)
     # plot_coordinates(granular_coordinates, SMALL_DOT)
     state_map = coords_to_states(granular_coordinates)
-    # irradiance_map = state_to_irradiance(state_map, )
+    irradiance_map = state_to_irradiance(state_map)
 
 
 # Code to parse command-line arguments 
@@ -218,9 +268,7 @@ else:
     print("Please supply the URL from a google maps route.")
     print("Usage: python project.py <URL>\n=====")
 
-
-# reverse_geocode()
-
+    
 # Short route for testing
 """
 https://www.google.com/maps/dir/Pittsburgh,+PA/Washington,+DC,+DC/@39.6690482,-79.6376097,8z/data=!3m1!4b1!4m14!4m13!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x89b7c6de5af6e45b:0xc2524522d4885d2a!2m2!1d-77.0368707!2d38.9071923!3e0

@@ -23,12 +23,28 @@ from os import stat
 import pandas as pd
 import numpy as np
 import glob, os
+import us
+from datetime import datetime
+from dateutil import tz
 
 # Pick one year to use data from
 STANDARD_YEAR = 2018
 
 # Path to folder containing the state datasets downloaded from renewables.ninja
 FOLDER_PATH = "../state-data/"
+
+
+# Convert a UTC time to local time zone time
+def convert_time_zone(entry, time_zone):
+    from_zone = tz.gettz('UTC')
+    to_zone = tz.gettz(time_zone)
+
+    # Label time object as UTC
+    utc = entry.replace(tzinfo=from_zone)
+
+    # Convert to specified time zone
+    central = utc.astimezone(to_zone)
+    return central
 
 
 # Clean a single state's sheet
@@ -44,16 +60,26 @@ def clean_sheet(sheet_name):
     df.drop(['precipitation', 'irradiance_toa', 'snowfall', 'snow_mass', 'cloud_cover'], axis=1, inplace=True)
     # print(df.shape)
 
+    # Get state name from sheet name
+    state_name = sheet_name.split('ninja_weather_country_US.')[1].split("_merra-2")[0]
+
     # Convert time-stamps to datetime types
     df['time'] =  pd.to_datetime(df['time'])
 
+    # Cut out some data to save time
+    df = df[df['time'].dt.year >= STANDARD_YEAR-1]
+
+    # Resolve time zone
+    time_zone = us.states.lookup('MD').capital_tz
+    df['time'] = df['time'].apply(lambda x: convert_time_zone(x, time_zone))
+
     # Choose a specific year's worth of data
     df = df[df['time'].dt.year == STANDARD_YEAR]
+    df["time"] = df["time"].apply(lambda x: str(x).split(":00-")[0])
 
     df = df.reset_index(drop=True)
 
     # Tag with state name in a new column
-    state_name = sheet_name.split('ninja_weather_country_US.')[1].split("_merra-2")[0]
     print(state_name)
     df["state"] = state_name  
     return df  
@@ -79,7 +105,7 @@ print(combined_df.shape)
 # Expect 8760 * 51 rows, and 5 columns
 
 # Remove existing csv and download as new one
-os.remove('../Code/irradiance.csv')
+# os.remove('../Code/irradiance.csv')
 combined_df.to_csv('../Code/irradiance.csv', index=False)
 
 
