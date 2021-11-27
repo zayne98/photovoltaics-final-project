@@ -15,3 +15,5 @@ https://pypi.org/project/us/
 https://github.com/thampiman/reverse-geocoder
 
 Using max irradiance per state to get lower bound on drive time
+
+Discuss the Panel assumptions made for the constants I used

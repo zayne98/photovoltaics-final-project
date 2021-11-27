@@ -35,6 +35,7 @@
 # If you have any other troubles running this, email me (Zayne Khouja)
 #   at zck@andrew.cmu.edu
 
+from os import stat
 import requests
 import sys
 import math
@@ -44,6 +45,7 @@ from geopy.geocoders import GoogleV3
 import pandas as pd
 import reverse_geocoder
 import us
+import numpy as np
 
 
 # I created a developer account for google's cloud services.  I will be using
@@ -71,6 +73,8 @@ SMALL_DOT = 2
 MONTH = "7"
 DAY = "1"
 IRRADIANCE_PATH = "./irradiance.csv"
+
+
 
 # Converts a given address (formatted as per a google URL's input) to its
 #   respective longitude and lattitude coordinate.
@@ -123,8 +127,8 @@ def build_pairs(coords):
 
 
 # Given a list of coordinates, resolves a straight line between each adjacent 
-#   pair of points, then defines additional coordinates every __TODO__ degrees
-#   along the line.
+#   pair of points, then defines additional coordinates every 
+#   INTERPOLATION_GRANULARITY degrees along the line. (constant defined above)
 # This provides a degree of granularity in the irradiance calculations along
 #   the route.
 def interpolate(coord_pairs):
@@ -228,39 +232,160 @@ def coords_to_states(coord_lists):
 #   progression of a road trip
 # I select the maximum irradiance for each state (regardless of date), to 
 #   get a lower bound on drive time
-def state_to_irradiance(state_lists):
+# Returns the temperature for that day as well
+def state_to_irrad_temp(state_lists):
     df = pd.read_csv(IRRADIANCE_PATH, header = 0, dtype={1: float, 2: float, 
         3: float, 4: 'str'})
     df['time'] =  pd.to_datetime(df['time'])
 
-    total_irrad_list = []
+    total_list = []
     for states in state_lists:
-        single_irrad_list = []
+        single_list = []
         for state in states:
             state_df = df[df["state"] == state]
             state_df = state_df.reset_index(drop=True)
-            irrad = state_df.iloc[state_df["irradiance_surface"].idxmax()]["irradiance_surface"]
-            single_irrad_list.append(irrad)
-        total_irrad_list.append(single_irrad_list)
-    print("Resolved irradiance values for states as:", str(total_irrad_list), "\n")
-    return total_irrad_list
+            max_entry = state_df.iloc[state_df["irradiance_surface"].idxmax()]
+            irrad = max_entry["irradiance_surface"]
+            temp = max_entry["temperature"]
+            single_list.append((irrad,temp))
+        total_list.append(single_list)
+    print("Resolved irrad and temp values for states as:", str(total_list), "\n")
+    return total_list
+
+
+
+# Constants for Max Power Point calculations:
+V_OC_0 = 45.9 #V
+I_SC_0 = 9.07 #A
+GAMMA = -0.32 #%/C
+LAMBDA = -0.41 #%/C
+DELTA = 0.058
+NOCT = 44 #C
+N_CONST = 1.1
+K_CONST = 1.38 * math.pow(10, -23) #J/K
+E_CONST = 1.602 * math.pow(10,-19) #A
+R_S = 0.001 #Ohm
+R_SH = 1000 #Ohm
+
+# ===============
+# Next several functions involve computing the Max Power Point
+# ===============
+
+def get_T_cell(G, T_amb):
+    return T_amb + (G * (NOCT - 20) / 800) 
+
+def get_V_oc(G, T_cell):
+    term1 = V_OC_0 / (1 + (DELTA * np.log(1000 / G)))
+    term2 = 1 + (GAMMA * (T_cell - 25))
+    return abs(term1 * term2)
+
+def get_I_sc(G, T_cell):
+    term1 = I_SC_0 * (G / 1000)
+    term2 = 1 + (LAMBDA * (T_cell - 25))
+    return abs(term1 * term2)
+
+def get_FF_0(V_oc, T_amb):
+    V_T = N_CONST * K_CONST * T_amb / E_CONST
+    num = np.log(abs((V_oc / V_T) + 0.72))
+    denom = 1 + (V_oc / V_T)
+    return 1 - (num / denom)
+
+def get_R_CH(V_oc, I_sc):
+    return V_oc / I_sc
+
+def get_r_S(R_CH):
+    return R_S / R_CH
+
+def get_r_SH(R_CH):
+    return R_SH / R_CH
+
+def get_FF(FF_0, V_oc, I_sc):
+    R_CH = get_R_CH(V_oc, I_sc)
+    r_S = get_r_S(R_CH)
+    r_SH = get_r_SH(R_CH)
+    return FF_0 * (1 - r_S) * (1 - (1 / r_SH))
+
+
+def get_MPP_Isc(G_T_pair):
+    (g, T_amb) = G_T_pair
+    T_cell = get_T_cell(g, T_amb)
+
+    V_oc = get_V_oc(g, T_cell)
+    I_sc = get_I_sc(g, T_cell)
+
+    ff_0 = get_FF_0(V_oc, T_amb)
+    ff = get_FF(ff_0, V_oc, I_sc)
+
+    mpp = ff * V_oc * I_sc
+    return (mpp, I_sc)
+
+# ===============
+# End MPP-related functions
+# ===============
+
+
+# Given the Irradiance and Temperature for the coordinates, resolves the max
+#   power point!
+def irrad_temp_to_MPP_Isc(irrad_temp_lists):
+    total_list = []
+    for irrad_temp_list in irrad_temp_lists:
+        single_list = []
+        for G_T_amb_pair in irrad_temp_list:
+            mpp_isc = get_MPP_Isc(G_T_amb_pair)
+            single_list.append(mpp_isc)
+        total_list.append(single_list)
+    print("Resolved MPP and I_sc as:", str(total_list), "\n")
+    return total_list
+
+
+# Constants for a deep cycle battery
+# I referenced a Duralast Deep Cycle Marine Battery for these numbers:
+# https://www.autozone.com/batteries-starting-and-charging/rv-battery/p/duralast-29dp-dl-group-29-deep-cycle-marine-and-rv-battery/95824_0_0
+AMP_HOUR = 65
+
+# Computes the expected charge time to fill a deep cycle battery
+def get_charge_time(I_sc):
+    return AMP_HOUR / I_sc
+
+# Given the Isc and MPP, maps them to expeced charge times
+def MPP_Isc_to_charge_time(mpp_isc_lists):
+    total_list = []
+    for mpp_isc_list in mpp_isc_lists:
+        single_list = []
+        for (mpp, I_sc) in mpp_isc_list:
+            charge_time = get_charge_time(I_sc)
+            single_list.append(charge_time)
+        total_list.append(single_list)
+    print("Resolved charge times as:", str(total_list), "\n")
+    return total_list
+
+# TODO: Figure out how to attach charge times to the map to understand distance
+# TODO: Understand why my numbers seem so very wrong :(
 
 
 # Main driver function to organize computations
-def driver(url):
+def driver(url, do_plot):
     coordinates = parse_url(url)
-    # plot_coordinates(coordinates, BIG_DOT)
+    if do_plot:
+        plot_coordinates(coordinates, BIG_DOT)
     coordinate_pairs = build_pairs(coordinates)
     granular_coordinates = interpolate(coordinate_pairs)
-    # plot_coordinates(granular_coordinates, SMALL_DOT)
+    if do_plot:
+        plot_coordinates(granular_coordinates, SMALL_DOT)
     state_map = coords_to_states(granular_coordinates)
-    irradiance_map = state_to_irradiance(state_map)
+    irrad_temp_map = state_to_irrad_temp(state_map)
+    MPP_Isc_map = irrad_temp_to_MPP_Isc(irrad_temp_map)
+    charge_times_map = MPP_Isc_to_charge_time(MPP_Isc_map)
 
 
 # Code to parse command-line arguments 
+# Pass a random second argument if you want to skip the plotting part
 if len(sys.argv) > 1:
     print("=====")
-    driver(sys.argv[1])
+    do_plot = True
+    if (len(sys.argv) > 2):
+        do_plot = False
+    driver(sys.argv[1], do_plot)
     print("Execution complete.")
     print("=====")
 else:
@@ -277,4 +402,9 @@ https://www.google.com/maps/dir/Pittsburgh,+PA/Washington,+DC,+DC/@39.6690482,-7
 # Long route for testing (part of my winter break return route)
 """
 https://www.google.com/maps/dir/Pittsburgh,+PA/Hot+Springs+National+Park/Magazine+Mountain,+Arkansas/Petrified+Forest+National+Park/Mesa+Verde+National+Park,+Mesa+Verde,+CO/Capitol+Reef+National+Park,+Utah/Great+Basin+National+Park,+Nevada/Death+Valley,+CA/San+Jose,+CA/@36.1182533,-119.0157453,4z/data=!3m1!4b1!4m56!4m55!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x87cd2a4f3e14f595:0x582d6639762948dd!2m2!1d-93.0423545!2d34.5216915!1m5!1m1!1s0x87cc7df3a3deba49:0xa00510e07fa0fe9e!2m2!1d-93.6449152!2d35.167312!1m5!1m1!1s0x872f9b3e3ba72d9b:0xf026f23d8c8c2ecd!2m2!1d-109.78204!2d35.065931!1m5!1m1!1s0x873960bf2ed7711f:0x79f695a21bf61863!2m2!1d-108.4618335!2d37.2308729!1m5!1m1!1s0x874a00ff07e7a253:0xde3bec53484fff07!2m2!1d-111.1354983!2d38.0877312!1m5!1m1!1s0x80b15c25d7cc0d03:0x3cd4750fafbebd31!2m2!1d-114.2633787!2d38.9299798!1m5!1m1!1s0x80c739a21e8fffb1:0x1c897383d723dd25!2m2!1d-116.9325408!2d36.5322649!1m5!1m1!1s0x808fcae48af93ff5:0xb99d8c0aca9f717b!2m2!1d-121.8863286!2d37.3382082!3e0
+"""
+
+# East Coast vertical route
+"""
+https://www.google.com/maps/dir/Bangor,+ME+04401/Boston,+MA/Philadelphia,+PA/Cape+Charles,+VA/Wilmington,+NC/Charleston,+SC/Jacksonville,+FL/Miami,+FL/@34.9822916,-84.2372354,5z/data=!3m1!4b1!4m50!4m49!1m5!1m1!1s0x4cae4b46101129bd:0x4d0918b0a7af7677!2m2!1d-68.7712257!2d44.8016128!1m5!1m1!1s0x89e3652d0d3d311b:0x787cbf240162e8a0!2m2!1d-71.0588801!2d42.3600825!1m5!1m1!1s0x89c6b7d8d4b54beb:0x89f514d88c3e58c1!2m2!1d-75.1652215!2d39.9525839!1m5!1m1!1s0x89ba5c609acedfa3:0x52caf608b4c59f27!2m2!1d-76.0174336!2d37.267916!1m5!1m1!1s0x89a9f5a20debaed5:0x5e66493884093032!2m2!1d-77.8868117!2d34.2103894!1m5!1m1!1s0x88fe7a42dca82477:0x35faf7e0aee1ec6b!2m2!1d-79.9310512!2d32.7764749!1m5!1m1!1s0x88e5b716f1ceafeb:0xc4cd7d3896fcc7e2!2m2!1d-81.655651!2d30.3321838!1m5!1m1!1s0x88d9b0a20ec8c111:0xff96f271ddad4f65!2m2!1d-80.1917902!2d25.7616798!3e0
 """
