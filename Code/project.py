@@ -258,7 +258,7 @@ def state_to_irrad_temp(state_lists):
 V_OC_0 = 45.9 #V
 I_SC_0 = 9.07 #A
 GAMMA = -0.32 #%/C
-LAMBDA = -0.41 #%/C
+LAMBDA = 0.05 #%/C
 DELTA = 0.058
 NOCT = 44 #C
 N_CONST = 1.1
