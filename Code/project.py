@@ -12,6 +12,7 @@
 #           'pip install geopy'
 #           'pip install us'
 #           'pip install reverse_geocoder'
+#           'pip install matplotlib-label-lines'
 #       Note: These instructions probably only work on Linux/Macs.  
 #           I'm not sure about Windows
 #   2. Plot a route on google maps and copy the URL
@@ -35,6 +36,8 @@
 # If you have any other troubles running this, email me (Zayne Khouja)
 #   at zck@andrew.cmu.edu
 
+# TODO: Add specified month to use
+
 from os import stat
 import requests
 import sys
@@ -46,6 +49,7 @@ import pandas as pd
 import reverse_geocoder
 import us
 import numpy as np
+from labellines import labelLine, labelLines
 
 
 # I created a developer account for google's cloud services.  I will be using
@@ -60,7 +64,7 @@ GOOGLE_API_KEY = "AIzaSyA7CzmKB2lQpQl-RYVY9cjRriYcjFJJCg0"
 #   will yield more granular data, but will take longer to compute. 
 # The unit of this value is lat/long degrees.  A value of 0.25 defines a
 #   coordinate roughly every 17 miles (28 km).
-INTERPOLATION_GRANULARITY = 0.25
+INTERPOLATION_GRANULARITY = 0.5
 
 # Defines for plotting coordinates on the map
 BIG_DOT = 5
@@ -179,6 +183,36 @@ def plot_coordinates(coords, dot_size):
         (x, y) = m(long, lat)
         m.plot(x,y,marker='o',color='Red',markersize=dot_size)
 
+    plt.title("Initial Route Waypoints")
+
+    plt.show()
+
+
+# Plots the coordinates with lines between them
+def plot_coords_with_lines(coords, dot_size):
+    if (any(isinstance(coord, list) for coord in coords)):
+        coords = [item for sublist in coords for item in sublist]
+
+    m = Basemap(llcrnrlon=-121,llcrnrlat=20,urcrnrlon=-62,urcrnrlat=51,
+        projection='lcc',lat_1=32,lat_2=45,lon_0=-95)
+    plt.figure(num=1,figsize=(9,7))
+    m.drawcoastlines()
+    m.drawstates()
+    m.drawcountries()
+    m.drawmapboundary(fill_color='paleturquoise')
+    m.fillcontinents(color='peachpuff',lake_color='paleturquoise')
+
+    (prev_y, prev_x) = (0, 0)
+    for (lat, long) in coords:
+        (x, y) = m(long, lat)
+        if (prev_y != 0 or prev_x != 0):
+            xs = [x, prev_x]
+            ys = [y, prev_y]
+            m.plot(xs, ys, linewidth=3, zorder=1)
+        m.plot(x,y,marker='o',color='Red',markersize=dot_size, zorder=10)
+        (prev_y, prev_x) = (y, x)
+
+    plt.title("Interpolation Between Route Waypoints")
     plt.show()
 
 
@@ -359,8 +393,60 @@ def MPP_Isc_to_charge_time(mpp_isc_lists):
     print("Resolved charge times as:", str(total_list), "\n")
     return total_list
 
-# TODO: Figure out how to attach charge times to the map to understand distance
-# TODO: Understand why my numbers seem so very wrong :(
+
+# Plot the interpolated route with drive times labeled for each leg
+def plot_final_time_map(coords, dot_size, states, times):
+    # If given a list of lists, flatten it to a single list
+    if (any(isinstance(coord, list) for coord in coords)):
+        coords = [item for sublist in coords for item in sublist]
+    if (any(isinstance(states, list) for states in states)):
+        states = [item for sublist in states for item in sublist]
+    if (any(isinstance(times, list) for times in times)):
+        times = [item for sublist in times for item in sublist]
+
+    m = Basemap(llcrnrlon=-121,llcrnrlat=20,urcrnrlon=-62,urcrnrlat=51,
+        projection='lcc',lat_1=32,lat_2=45,lon_0=-95)
+    plt.figure(num=1,figsize=(9,7))
+    m.drawcoastlines()
+    m.drawstates()
+    m.drawcountries()
+    m.drawmapboundary(fill_color='paleturquoise')
+    m.fillcontinents(color='peachpuff',lake_color='paleturquoise')
+
+    prev_state = states[0]
+    prev_coord = coords[0]
+    prev_time = times[0]
+    (lat, long) = coords[0]
+    (x, y) = m(long, lat)
+    m.plot(x,y,marker='o',color='Red',markersize=dot_size, zorder=10)
+    for idx in range(len(states)):
+        if (states[idx] != prev_state):
+            (prev_lat, prev_long) = prev_coord
+            (prev_x, prev_y) = m(prev_long, prev_lat)
+            (lat, long) = coords[idx]
+            (x, y) = m(long, lat)
+            m.plot(x,y,marker='o',color='Red',markersize=dot_size, zorder=10)
+            xs = [x, prev_x]
+            ys = [y, prev_y]
+            to_label = ('%.2f' % times[idx]) + " Hours/Day"
+            plt.annotate(to_label, xy=(np.mean(xs) + 100000, np.mean(ys)), weight='bold', bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+            m.plot(xs, ys, linewidth=3, zorder=1)
+            prev_state = states[idx]
+            prev_coord = coords[idx]
+            prev_time = times[idx]
+    (prev_lat, prev_long) = prev_coord
+    (prev_x, prev_y) = m(prev_long, prev_lat)
+    (long, lat) = coords[len(coords)-1]
+    (x, y) = m(lat, long)
+    m.plot(x,y,marker='o',color='Red',markersize=dot_size, zorder=10)
+    xs = [x, prev_x]
+    ys = [y, prev_y]
+    to_label = ('%.2f' % times[len(times)-1]) + " Hours/Day"
+    plt.annotate(to_label, xy=(np.mean(xs) + 100000, np.mean(ys)), weight='bold', bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
+    m.plot(xs, ys, linewidth=3, zorder=1)
+    plt.title("Drive time (Hours/Day) per State\nto Fully Charge Battery")
+
+    plt.show()
 
 
 # Main driver function to organize computations
@@ -371,11 +457,13 @@ def driver(url, do_plot):
     coordinate_pairs = build_pairs(coordinates)
     granular_coordinates = interpolate(coordinate_pairs)
     if do_plot:
-        plot_coordinates(granular_coordinates, SMALL_DOT)
+        plot_coords_with_lines(coordinates, BIG_DOT)
     state_map = coords_to_states(granular_coordinates)
     irrad_temp_map = state_to_irrad_temp(state_map)
     MPP_Isc_map = irrad_temp_to_MPP_Isc(irrad_temp_map)
     charge_times_map = MPP_Isc_to_charge_time(MPP_Isc_map)
+    if do_plot:
+        plot_final_time_map(granular_coordinates, BIG_DOT, state_map, charge_times_map)
 
 
 # Code to parse command-line arguments 
@@ -407,4 +495,11 @@ https://www.google.com/maps/dir/Pittsburgh,+PA/Hot+Springs+National+Park/Magazin
 # East Coast vertical route
 """
 https://www.google.com/maps/dir/Bangor,+ME+04401/Boston,+MA/Philadelphia,+PA/Cape+Charles,+VA/Wilmington,+NC/Charleston,+SC/Jacksonville,+FL/Miami,+FL/@34.9822916,-84.2372354,5z/data=!3m1!4b1!4m50!4m49!1m5!1m1!1s0x4cae4b46101129bd:0x4d0918b0a7af7677!2m2!1d-68.7712257!2d44.8016128!1m5!1m1!1s0x89e3652d0d3d311b:0x787cbf240162e8a0!2m2!1d-71.0588801!2d42.3600825!1m5!1m1!1s0x89c6b7d8d4b54beb:0x89f514d88c3e58c1!2m2!1d-75.1652215!2d39.9525839!1m5!1m1!1s0x89ba5c609acedfa3:0x52caf608b4c59f27!2m2!1d-76.0174336!2d37.267916!1m5!1m1!1s0x89a9f5a20debaed5:0x5e66493884093032!2m2!1d-77.8868117!2d34.2103894!1m5!1m1!1s0x88fe7a42dca82477:0x35faf7e0aee1ec6b!2m2!1d-79.9310512!2d32.7764749!1m5!1m1!1s0x88e5b716f1ceafeb:0xc4cd7d3896fcc7e2!2m2!1d-81.655651!2d30.3321838!1m5!1m1!1s0x88d9b0a20ec8c111:0xff96f271ddad4f65!2m2!1d-80.1917902!2d25.7616798!3e0
+"""
+
+# Scratch data for plotting tests
+"""
+granular_coordinates = [[(44.8016128, -68.7712257), (44.61380277692308, -68.94719911538462), (44.42599275384615, -69.12317253076924), (44.23818273076923, -69.29914594615386), (44.050372707692304, -69.47511936153846), (43.86256268461538, -69.65109277692308), (43.67475266153846, -69.82706619230768), (43.48694263846154, -70.0030396076923), (43.299132615384615, -70.17901302307692), (43.111322592307694, -70.35498643846154), (42.923512569230766, -70.53095985384616), (42.73570254615384, -70.70693326923076), (42.547892523076925, -70.88290668461538), (42.3600825, -71.0588801)], [(42.3600825, -71.0588801), (42.23337204736842, -71.27500333157896), (42.10666159473684, -71.49112656315789), (41.979951142105264, -71.70724979473684), (41.85324068947368, -71.92337302631579), (41.72653023684211, -72.13949625789473), (41.599819784210524, -72.35561948947368), (41.47310933157895, -72.57174272105263), (41.34639887894737, -72.78786595263158), (41.219688426315784, -73.00398918421052), (41.092977973684214, -73.22011241578947), (40.96626752105263, -73.43623564736842), (40.83955706842106, -73.65235887894737), (40.71284661578947, -73.86848211052632), (40.586136163157896, -74.08460534210526), (40.45942571052632, -74.30072857368421), (40.33271525789473, -74.51685180526316), (40.20600480526316, -74.7329750368421), (40.07929435263158, -74.94909826842105), (39.9525839, -75.1652215)], [(39.9525839, -75.1652215), (39.70852318181818, -75.24269532727273), (39.464462463636366, -75.32016915454545), (39.220401745454545, -75.39764298181818), (38.97634102727273, -75.4751168090909), (38.73228030909091, -75.55259063636363), (38.48821959090909, -75.63006446363636), (38.24415887272727, -75.70753829090908), (38.000098154545455, -75.78501211818181), (37.756037436363634, -75.86248594545454), (37.51197671818182, -75.93995977272726), (37.267916, -76.01743359999999)], [(37.267916, -76.01743359999999), (37.04952124285714, -76.15096060714285), (36.831126485714286, -76.28448761428571), (36.612731728571426, -76.41801462142857), (36.39433697142857, -76.55154162857141), (36.17594221428571, -76.68506863571427), (35.95754745714286, -76.81859564285713), (35.7391527, -76.95212264999999), (35.520757942857145, -77.08564965714285), (35.302363185714285, -77.21917666428571), (35.083968428571424, -77.35270367142857), (34.865573671428564, -77.48623067857142), (34.64717891428571, -77.61975768571428), (34.42878415714286, -77.75328469285714), (34.2103894, -77.8868117)], [(34.2103894, -77.8868117), (34.051065566666665, -78.11394942222222), (33.89174173333333, -78.34108714444444), (33.7324179, -78.56822486666667), (33.57309406666666, -78.79536258888889), (33.41377023333333, -79.02250031111112), (33.2544464, -79.24963803333334), (33.09512256666666, -79.47677575555556), (32.93579873333333, -79.70391347777779), (32.7764749, -79.93105120000001)], [(32.7764749, -79.93105120000001), (32.55426661818181, -80.08783300000002), (32.33205833636363, -80.2446148), (32.109850054545454, -80.40139660000001), (31.88764177272727, -80.5581784), (31.665433490909088, -80.71496020000001), (31.443225209090908, -80.871742), (31.221016927272725, -81.0285238), (30.998808645454545, -81.18530559999999), (30.776600363636362, -81.3420874), (30.554392081818182, -81.49886919999999), (30.3321838, -81.65565099999999)], [(30.3321838, -81.65565099999999), (30.091630957894736, -81.57860569473684), (29.851078115789473, -81.50156038947368), (29.610525273684207, -81.42451508421051), (29.369972431578944, -81.34746977894736), (29.129419589473684, -81.27042447368422), (28.88886674736842, -81.19337916842105), (28.64831390526316, -81.11633386315789), (28.407761063157892, -81.03928855789474), (28.167208221052633, -80.96224325263158), (27.926655378947366, -80.88519794736843), (27.686102536842107, -80.80815264210526), (27.44554969473684, -80.7311073368421), (27.204996852631574, -80.65406203157895), (26.964444010526314, -80.57701672631579), (26.72389116842105, -80.49997142105263), (26.48333832631579, -80.42292611578947), (26.242785484210525, -80.34588081052632), (26.002232642105263, -80.26883550526316), (25.7616798, -80.1917902)]]
+state_map = [['ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'NH', 'MA', 'MA', 'MA'], ['MA', 'MA', 'MA', 'RI', 'CT', 'CT', 'CT', 'CT', 'CT', 'CT', 'CT', 'NY', 'NY', 'NY', 'NY', 'NJ', 'NJ', 'NJ', 'PA', 'PA'], ['PA', 'NJ', 'NJ', 'DE', 'DE', 'DE', 'DE', 'MD', 'MD', 'VA', 'VA', 'VA'], ['VA', 'VA', 'VA', 'VA', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC'], ['NC', 'NC', 'NC', 'SC', 'SC', 'SC', 'SC', 'SC', 'SC', 'SC'], ['SC', 'SC', 'SC', 'SC', 'GA', 'GA', 'GA', 'GA', 'GA', 'FL', 'FL', 'FL'], ['FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL']] 
+charge_times_map = [[3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.2885628135215668, 3.01168115015612, 3.01168115015612, 3.01168115015612], [3.01168115015612, 3.01168115015612, 3.01168115015612, 3.3224160918649366, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 3.2048016756338917, 3.2048016756338917, 3.2048016756338917, 3.2048016756338917, 3.082332826570468, 3.082332826570468, 3.082332826570468, 2.9802478342501395, 2.9802478342501395], [2.9802478342501395, 3.082332826570468, 3.082332826570468, 3.0013158480032636, 3.0013158480032636, 3.0013158480032636, 3.0013158480032636, 2.7849466503584663, 2.7849466503584663, 2.687125202095605, 2.687125202095605, 2.687125202095605], [2.687125202095605, 2.687125202095605, 2.687125202095605, 2.687125202095605, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043], [2.659896163913043, 2.659896163913043, 2.659896163913043, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153], [3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 2.877744290034373, 2.877744290034373, 2.877744290034373, 2.877744290034373, 2.877744290034373, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507], [2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507]]
 """
