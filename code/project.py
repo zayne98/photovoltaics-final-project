@@ -1,5 +1,6 @@
 # Zayne Khouja, November 2021
 # Code for the final project of 18-883, Photovoltaic System Engineering
+# More info in the README (../README.md)
 
 # This file contains code that, when given a google maps route (provided as a
 #   URL), will determine the average amount of drive time per day to maintain
