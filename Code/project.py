@@ -1,7 +1,19 @@
+# Zayne Khouja, November 2021
+# Code for the final project of 18-883, Photovoltaic System Engineering
+
 # This file contains code that, when given a google maps route (provided as a
 #   URL), will determine the average amount of drive time per day to maintain
 #   full charge in your solar system's battery while still progressing along the
 #   route at the most liesurly pace possible.
+
+# Uses of this type of program:
+#   1) Helpful for people pursuing "van life" trying to live and work from the
+#       road, as this provides info on how long panels must have direct sunlight
+#       to ensure you have enough power to run your signal extender, computer,
+#       or other tech.
+#   2) Useful for casual road-trippers who want to know charge time to run
+#       their heater, stove, fan, etc.
+#   3) As a general planning tool to quantify the pace of a road trip
 
 # If testing this locally, follow these steps:
 #   1. This project requires a number of packages.  You should have "requests",
@@ -23,8 +35,19 @@
 #       URL. No '<>' or quotes needed.  Just the URL as you copied it.
 #       Example: python project.py https://www.google.com/maps/dir/Pittsburgh,+PA/Washington,+DC,+DC/@39.6690482,-79.6376097,8z/data=!3m1!4b1!4m14!4m13!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x89b7c6de5af6e45b:0xc2524522d4885d2a!2m2!1d-77.0368707!2d38.9071923!3e0
 #       NOTE: You must have a Wifi connection to run this.  It pings google.com
+#   5. You can also specify a particular month to use for predicting drive times.
+#       Specifically, it can be interesting to compare drive times during peak
+#       summer (July) with the middle of winter (January).  To do this, 
+#       include an additional argument 'python project.py <URL> <month>' where
+#       month is either the full month name (January) or the abbreviation (Jan).
+#       If no month argument is provided, July is used
 #
-#   This will output... TODO
+#   This will output 3 plots.  The first just displays the coarse waypoints.
+#       The second interpolates between the points, drawing straight lines as 
+#       rough approximations of the route.  The third plot breaks the route up
+#       into sections between unique states, annotating each section with the
+#       expected amount of charge time per state to fully charge the standard 
+#       deep cycle marine battery I referenced.
 
 # NOTE: If you're running this from a bash shell and recieve an error 
 #     similar to "bash: !: event not found", you should run 'set +H' 
@@ -35,8 +58,6 @@
 #
 # If you have any other troubles running this, email me (Zayne Khouja)
 #   at zck@andrew.cmu.edu
-
-# TODO: Add specified month to use
 
 from os import stat
 import requests
@@ -50,6 +71,7 @@ import reverse_geocoder
 import us
 import numpy as np
 from labellines import labelLine, labelLines
+import datetime
 
 
 # I created a developer account for google's cloud services.  I will be using
@@ -270,10 +292,11 @@ def coords_to_states(coord_lists):
 # I select the maximum irradiance for each state (regardless of date), to 
 #   get a lower bound on drive time
 # Returns the temperature for that day as well
-def state_to_irrad_temp(state_lists):
+def state_to_irrad_temp(state_lists, month):
     df = pd.read_csv(IRRADIANCE_PATH, header = 0, dtype={1: float, 2: float, 
         3: float, 4: 'str'})
     df['time'] =  pd.to_datetime(df['time'])
+    df = df[df['time'].dt.month == month]
 
     total_list = []
     for states in state_lists:
@@ -398,7 +421,7 @@ def MPP_Isc_to_charge_time(mpp_isc_lists):
 
 
 # Plot the interpolated route with drive times labeled for each leg
-def plot_final_time_map(coords, dot_size, states, times):
+def plot_final_time_map(coords, dot_size, states, times, month_str):
     # If given a list of lists, flatten it to a single list
     if (any(isinstance(coord, list) for coord in coords)):
         coords = [item for sublist in coords for item in sublist]
@@ -447,13 +470,26 @@ def plot_final_time_map(coords, dot_size, states, times):
     to_label = ('%.2f' % prev_time) + " (" + prev_state + ")"
     plt.annotate(to_label, xy=(np.mean(xs) + LABEL_X_OFFSET, np.mean(ys) + LABEL_Y_OFFSET), weight='bold', rotation=LABEL_ROTATION, bbox=dict(boxstyle='round,pad=0.2', fc='yellow', alpha=0.3))
     m.plot(xs, ys, linewidth=3, zorder=1)
-    plt.title("Drive time (Hours/Day) per State\nto Fully Charge Battery")
+    plt.title("Drive time (Hours per Day) per State\nto Fully Charge Battery in " + month_str)
 
     plt.show()
 
 
+def get_month_number(month_str):
+    month_number = None
+    if (len(month_str) > 3):
+        datetime_object = datetime.datetime.strptime(month_str, "%B")
+        month_number = datetime_object.month
+    else:
+        datetime_object = datetime.datetime.strptime(month_str, "%b")
+        month_number = datetime_object.month
+    print("Computing for month of " + month_str + "\n")
+    return month_number
+
+
 # Main driver function to organize computations
-def driver(url, do_plot):
+def driver(url, month_str, do_plot):
+    month_num = get_month_number(month_str)
     coordinates = parse_url(url)
     if do_plot:
         plot_coordinates(coordinates, BIG_DOT)
@@ -462,53 +498,57 @@ def driver(url, do_plot):
     if do_plot:
         plot_coords_with_lines(coordinates, BIG_DOT)
     state_map = coords_to_states(granular_coordinates)
-    irrad_temp_map = state_to_irrad_temp(state_map)
+    irrad_temp_map = state_to_irrad_temp(state_map, month_num)
     MPP_Isc_map = irrad_temp_to_MPP_Isc(irrad_temp_map)
     charge_times_map = MPP_Isc_to_charge_time(MPP_Isc_map)
    
     if do_plot:
-        plot_final_time_map(granular_coordinates, BIG_DOT, state_map, charge_times_map)
+        plot_final_time_map(granular_coordinates, BIG_DOT, state_map, charge_times_map, month_str)
 
 
 # Code to parse command-line arguments 
 # Pass a random second argument if you want to skip the plotting part
 if len(sys.argv) > 1:
     print("=====")
-    do_plot = True
+    month_str = "July" # Default to July unless another month is indicated
     if (len(sys.argv) > 2):
+        month_str = sys.argv[2]
+    do_plot = True
+    if (len(sys.argv) > 3):
         do_plot = False
-    driver(sys.argv[1], do_plot)
+    driver(sys.argv[1], month_str, do_plot)
     print("Execution complete.")
     print("=====")
 else:
     print("=====\nNo arguments provided.")
     print("Please supply the URL from a google maps route.")
-    print("Usage: python project.py <URL>\n=====")
+    print("Usage: python project.py <URL> <month>")
+    print('"month" argument is optional and can be provided as a full name or an abbrevation ("January" or "Jan")')
+    print("=====")
 
+
+
+# =======
+# Some routes I used for testing purposes.  
+# Can use these as inputs to the program.
+# =======
     
-# Short route for testing
+# Pennsylvania -> Washington, DC (Short route for testing)
 """
 https://www.google.com/maps/dir/Pittsburgh,+PA/Washington,+DC,+DC/@39.6690482,-79.6376097,8z/data=!3m1!4b1!4m14!4m13!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x89b7c6de5af6e45b:0xc2524522d4885d2a!2m2!1d-77.0368707!2d38.9071923!3e0
 """
 
-# Long route for testing (part of my winter break return route)
+# Pennsylvania -> California (Long route for testing)
 """
 https://www.google.com/maps/dir/Pittsburgh,+PA/Hot+Springs+National+Park/Magazine+Mountain,+Arkansas/Petrified+Forest+National+Park/Mesa+Verde+National+Park,+Mesa+Verde,+CO/Capitol+Reef+National+Park,+Utah/Great+Basin+National+Park,+Nevada/Death+Valley,+CA/San+Jose,+CA/@36.1182533,-119.0157453,4z/data=!3m1!4b1!4m56!4m55!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x87cd2a4f3e14f595:0x582d6639762948dd!2m2!1d-93.0423545!2d34.5216915!1m5!1m1!1s0x87cc7df3a3deba49:0xa00510e07fa0fe9e!2m2!1d-93.6449152!2d35.167312!1m5!1m1!1s0x872f9b3e3ba72d9b:0xf026f23d8c8c2ecd!2m2!1d-109.78204!2d35.065931!1m5!1m1!1s0x873960bf2ed7711f:0x79f695a21bf61863!2m2!1d-108.4618335!2d37.2308729!1m5!1m1!1s0x874a00ff07e7a253:0xde3bec53484fff07!2m2!1d-111.1354983!2d38.0877312!1m5!1m1!1s0x80b15c25d7cc0d03:0x3cd4750fafbebd31!2m2!1d-114.2633787!2d38.9299798!1m5!1m1!1s0x80c739a21e8fffb1:0x1c897383d723dd25!2m2!1d-116.9325408!2d36.5322649!1m5!1m1!1s0x808fcae48af93ff5:0xb99d8c0aca9f717b!2m2!1d-121.8863286!2d37.3382082!3e0
 """
 
-# East Coast vertical route
+# Maine -> Florida (East Coast vertical route)
 """
 https://www.google.com/maps/dir/Bangor,+ME+04401/Boston,+MA/Philadelphia,+PA/Cape+Charles,+VA/Wilmington,+NC/Charleston,+SC/Jacksonville,+FL/Miami,+FL/@34.9822916,-84.2372354,5z/data=!3m1!4b1!4m50!4m49!1m5!1m1!1s0x4cae4b46101129bd:0x4d0918b0a7af7677!2m2!1d-68.7712257!2d44.8016128!1m5!1m1!1s0x89e3652d0d3d311b:0x787cbf240162e8a0!2m2!1d-71.0588801!2d42.3600825!1m5!1m1!1s0x89c6b7d8d4b54beb:0x89f514d88c3e58c1!2m2!1d-75.1652215!2d39.9525839!1m5!1m1!1s0x89ba5c609acedfa3:0x52caf608b4c59f27!2m2!1d-76.0174336!2d37.267916!1m5!1m1!1s0x89a9f5a20debaed5:0x5e66493884093032!2m2!1d-77.8868117!2d34.2103894!1m5!1m1!1s0x88fe7a42dca82477:0x35faf7e0aee1ec6b!2m2!1d-79.9310512!2d32.7764749!1m5!1m1!1s0x88e5b716f1ceafeb:0xc4cd7d3896fcc7e2!2m2!1d-81.655651!2d30.3321838!1m5!1m1!1s0x88d9b0a20ec8c111:0xff96f271ddad4f65!2m2!1d-80.1917902!2d25.7616798!3e0
 """
 
-# Scratch data for plotting tests
-"""
-granular_coordinates = [[(44.8016128, -68.7712257), (44.61380277692308, -68.94719911538462), (44.42599275384615, -69.12317253076924), (44.23818273076923, -69.29914594615386), (44.050372707692304, -69.47511936153846), (43.86256268461538, -69.65109277692308), (43.67475266153846, -69.82706619230768), (43.48694263846154, -70.0030396076923), (43.299132615384615, -70.17901302307692), (43.111322592307694, -70.35498643846154), (42.923512569230766, -70.53095985384616), (42.73570254615384, -70.70693326923076), (42.547892523076925, -70.88290668461538), (42.3600825, -71.0588801)], [(42.3600825, -71.0588801), (42.23337204736842, -71.27500333157896), (42.10666159473684, -71.49112656315789), (41.979951142105264, -71.70724979473684), (41.85324068947368, -71.92337302631579), (41.72653023684211, -72.13949625789473), (41.599819784210524, -72.35561948947368), (41.47310933157895, -72.57174272105263), (41.34639887894737, -72.78786595263158), (41.219688426315784, -73.00398918421052), (41.092977973684214, -73.22011241578947), (40.96626752105263, -73.43623564736842), (40.83955706842106, -73.65235887894737), (40.71284661578947, -73.86848211052632), (40.586136163157896, -74.08460534210526), (40.45942571052632, -74.30072857368421), (40.33271525789473, -74.51685180526316), (40.20600480526316, -74.7329750368421), (40.07929435263158, -74.94909826842105), (39.9525839, -75.1652215)], [(39.9525839, -75.1652215), (39.70852318181818, -75.24269532727273), (39.464462463636366, -75.32016915454545), (39.220401745454545, -75.39764298181818), (38.97634102727273, -75.4751168090909), (38.73228030909091, -75.55259063636363), (38.48821959090909, -75.63006446363636), (38.24415887272727, -75.70753829090908), (38.000098154545455, -75.78501211818181), (37.756037436363634, -75.86248594545454), (37.51197671818182, -75.93995977272726), (37.267916, -76.01743359999999)], [(37.267916, -76.01743359999999), (37.04952124285714, -76.15096060714285), (36.831126485714286, -76.28448761428571), (36.612731728571426, -76.41801462142857), (36.39433697142857, -76.55154162857141), (36.17594221428571, -76.68506863571427), (35.95754745714286, -76.81859564285713), (35.7391527, -76.95212264999999), (35.520757942857145, -77.08564965714285), (35.302363185714285, -77.21917666428571), (35.083968428571424, -77.35270367142857), (34.865573671428564, -77.48623067857142), (34.64717891428571, -77.61975768571428), (34.42878415714286, -77.75328469285714), (34.2103894, -77.8868117)], [(34.2103894, -77.8868117), (34.051065566666665, -78.11394942222222), (33.89174173333333, -78.34108714444444), (33.7324179, -78.56822486666667), (33.57309406666666, -78.79536258888889), (33.41377023333333, -79.02250031111112), (33.2544464, -79.24963803333334), (33.09512256666666, -79.47677575555556), (32.93579873333333, -79.70391347777779), (32.7764749, -79.93105120000001)], [(32.7764749, -79.93105120000001), (32.55426661818181, -80.08783300000002), (32.33205833636363, -80.2446148), (32.109850054545454, -80.40139660000001), (31.88764177272727, -80.5581784), (31.665433490909088, -80.71496020000001), (31.443225209090908, -80.871742), (31.221016927272725, -81.0285238), (30.998808645454545, -81.18530559999999), (30.776600363636362, -81.3420874), (30.554392081818182, -81.49886919999999), (30.3321838, -81.65565099999999)], [(30.3321838, -81.65565099999999), (30.091630957894736, -81.57860569473684), (29.851078115789473, -81.50156038947368), (29.610525273684207, -81.42451508421051), (29.369972431578944, -81.34746977894736), (29.129419589473684, -81.27042447368422), (28.88886674736842, -81.19337916842105), (28.64831390526316, -81.11633386315789), (28.407761063157892, -81.03928855789474), (28.167208221052633, -80.96224325263158), (27.926655378947366, -80.88519794736843), (27.686102536842107, -80.80815264210526), (27.44554969473684, -80.7311073368421), (27.204996852631574, -80.65406203157895), (26.964444010526314, -80.57701672631579), (26.72389116842105, -80.49997142105263), (26.48333832631579, -80.42292611578947), (26.242785484210525, -80.34588081052632), (26.002232642105263, -80.26883550526316), (25.7616798, -80.1917902)]]
-state_map = [['ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'ME', 'NH', 'MA', 'MA', 'MA'], ['MA', 'MA', 'MA', 'RI', 'CT', 'CT', 'CT', 'CT', 'CT', 'CT', 'CT', 'NY', 'NY', 'NY', 'NY', 'NJ', 'NJ', 'NJ', 'PA', 'PA'], ['PA', 'NJ', 'NJ', 'DE', 'DE', 'DE', 'DE', 'MD', 'MD', 'VA', 'VA', 'VA'], ['VA', 'VA', 'VA', 'VA', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC', 'NC'], ['NC', 'NC', 'NC', 'SC', 'SC', 'SC', 'SC', 'SC', 'SC', 'SC'], ['SC', 'SC', 'SC', 'SC', 'GA', 'GA', 'GA', 'GA', 'GA', 'FL', 'FL', 'FL'], ['FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL', 'FL']] 
-charge_times_map = [[3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.5848959062360697, 3.2885628135215668, 3.01168115015612, 3.01168115015612, 3.01168115015612], [3.01168115015612, 3.01168115015612, 3.01168115015612, 3.3224160918649366, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 2.9517459143811307, 3.2048016756338917, 3.2048016756338917, 3.2048016756338917, 3.2048016756338917, 3.082332826570468, 3.082332826570468, 3.082332826570468, 2.9802478342501395, 2.9802478342501395], [2.9802478342501395, 3.082332826570468, 3.082332826570468, 3.0013158480032636, 3.0013158480032636, 3.0013158480032636, 3.0013158480032636, 2.7849466503584663, 2.7849466503584663, 2.687125202095605, 2.687125202095605, 2.687125202095605], [2.687125202095605, 2.687125202095605, 2.687125202095605, 2.687125202095605, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043, 2.659896163913043], [2.659896163913043, 2.659896163913043, 2.659896163913043, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153], [3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 3.0532236569372153, 2.877744290034373, 2.877744290034373, 2.877744290034373, 2.877744290034373, 2.877744290034373, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507], [2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507, 2.9997490418904507]]
-"""
-
-# East to West coast example
+# Maine -> California (East to West coast)
 """
 https://www.google.com/maps/dir/Augusta,+ME/Albany,+NY/Pittsburgh,+PA/Indianapolis,+IN/Oklahoma+City,+OK/Albuquerque,+NM/Phoenix,+AZ/San+Diego,+CA/@37.1101918,-111.5280353,4z/data=!3m1!4b1!4m50!4m49!1m5!1m1!1s0x4cb200fdafacc49d:0x79a3488d64220b2d!2m2!1d-69.7794897!2d44.3106241!1m5!1m1!1s0x89de0a34cc4ffb4b:0xe1a16312a0e728c4!2m2!1d-73.7562317!2d42.6525793!1m5!1m1!1s0x8834f16f48068503:0x8df915a15aa21b34!2m2!1d-79.9958864!2d40.4406248!1m5!1m1!1s0x886b50ffa7796a03:0xd68e9df640b9ea7c!2m2!1d-86.158068!2d39.768403!1m5!1m1!1s0x87ad8a547ef8d281:0x33a21274d14f3a9d!2m2!1d-97.5164276!2d35.4675602!1m5!1m1!1s0x87220addd309837b:0xc0d3f8ceb8d9f6fd!2m2!1d-106.650422!2d35.0843859!1m5!1m1!1s0x872b12ed50a179cb:0x8c69c7f8354a1bac!2m2!1d-112.0740373!2d33.4483771!1m5!1m1!1s0x80d9530fad921e4b:0xd3a21fdfd15df79!2m2!1d-117.1610838!2d32.715738!3e0
 """

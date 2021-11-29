@@ -1,3 +1,7 @@
+
+TODO: Readme not complete. Instructions to run code are currently in project.py 
+as a comment
+
 https://matplotlib.org/basemap/users/geography.html
 https://stackoverflow.com/questions/39742305/how-to-use-basemap-python-to-plot-us-with-50-states
 
@@ -17,3 +21,5 @@ https://github.com/thampiman/reverse-geocoder
 Using max irradiance per state to get lower bound on drive time
 
 Discuss the Panel assumptions made for the constants I used
+
+Give instructions for how to use this code

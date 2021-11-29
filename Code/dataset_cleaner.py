@@ -105,7 +105,7 @@ print(combined_df.shape)
 # Expect 8760 * 51 rows, and 5 columns
 
 # Remove existing csv and download as new one
-# os.remove('../Code/irradiance.csv')
+os.remove('../Code/irradiance.csv')
 combined_df.to_csv('../Code/irradiance.csv', index=False)
 
 
