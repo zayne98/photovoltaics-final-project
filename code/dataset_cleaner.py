@@ -1,3 +1,6 @@
+# Note: There is probably no reason for you to use this.  It is specifically
+#   applicable to cleaning and condensing the irradiance datasets I used
+
 # In an effort to get semi-accurate data for irradiance across the US, 
 #   I downloaded datasets from https://www.renewables.ninja/.
 # This site holds a different dataset for each state in the US, containing
@@ -14,11 +17,6 @@
 #   in an easy to use API, but the feature requires a paid subscription.
 
 
-# Goal:
-#   Only want Temperature and Irradiance_surface, and Air_density
-#   Choose 2019 only
-#   Combine with other states into single dataset
-
 from os import stat
 import pandas as pd
 import numpy as np
@@ -31,6 +29,7 @@ from dateutil import tz
 STANDARD_YEAR = 2018
 
 # Path to folder containing the state datasets downloaded from renewables.ninja
+# I did not publish this folder on github, so this code won't work for you :P
 FOLDER_PATH = "../state-data/"
 
 
