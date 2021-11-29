@@ -24,7 +24,6 @@
 #           'pip install geopy'
 #           'pip install us'
 #           'pip install reverse_geocoder'
-#           'pip install matplotlib-label-lines'
 #       Note: These instructions probably only work on Linux/Macs.  
 #           I'm not sure about Windows
 #   2. Plot a route on google maps and copy the URL
@@ -70,7 +69,6 @@ import pandas as pd
 import reverse_geocoder
 import us
 import numpy as np
-from labellines import labelLine, labelLines
 import datetime
 
 
