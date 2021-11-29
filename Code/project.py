@@ -72,6 +72,10 @@ import numpy as np
 import datetime
 
 
+# ========
+# Constant Definitions
+# ========
+
 # I created a developer account for google's cloud services.  I will be using
 #   googles Geocoding API to convert named locations to their coordinates.
 # I believe anyone should be able to use this key as I have not restricted it
@@ -93,14 +97,30 @@ LABEL_ROTATION = -30
 LABEL_X_OFFSET = 50000
 LABEL_Y_OFFSET = -400000
 
-# Standardizing the date and time to use for resolving irradiance
-# Using the Date/Time with the highest irradiance (from Homework 1)
-# As an approximation for the lower bound of drive time
-# This represents July 1st
-MONTH = "7"
-DAY = "1"
+# Path to the csv containing my cleaned irradiance data (and temperature data)
 IRRADIANCE_PATH = "./irradiance.csv"
 
+# Constants for a deep cycle battery
+# I referenced a Duralast Deep Cycle Marine Battery for these numbers:
+# https://www.autozone.com/batteries-starting-and-charging/rv-battery/p/duralast-29dp-dl-group-29-deep-cycle-marine-and-rv-battery/95824_0_0
+AMP_HOUR = 65
+
+# Constants for Max Power Point calculations:
+V_OC_0 = 45.9 #V
+I_SC_0 = 9.07 #A
+GAMMA = -0.32 #%/C
+LAMBDA = 0.05 #%/C
+DELTA = 0.058
+NOCT = 44 #C
+N_CONST = 1.1
+K_CONST = 1.38 * math.pow(10, -23) #J/K
+E_CONST = 1.602 * math.pow(10,-19) #A
+R_S = 0.001 #Ohm
+R_SH = 1000 #Ohm
+
+# ========
+# End Constant Definitions
+# ========
 
 
 # Converts a given address (formatted as per a google URL's input) to its
@@ -311,20 +331,6 @@ def state_to_irrad_temp(state_lists, month):
     return total_list
 
 
-
-# Constants for Max Power Point calculations:
-V_OC_0 = 45.9 #V
-I_SC_0 = 9.07 #A
-GAMMA = -0.32 #%/C
-LAMBDA = 0.05 #%/C
-DELTA = 0.058
-NOCT = 44 #C
-N_CONST = 1.1
-K_CONST = 1.38 * math.pow(10, -23) #J/K
-E_CONST = 1.602 * math.pow(10,-19) #A
-R_S = 0.001 #Ohm
-R_SH = 1000 #Ohm
-
 # ===============
 # Next several functions involve computing the Max Power Point
 # ===============
@@ -383,7 +389,7 @@ def get_MPP_Isc(G_T_pair):
 
 
 # Given the Irradiance and Temperature for the coordinates, resolves the max
-#   power point!
+#   power point! (and the short-curcuit current)
 def irrad_temp_to_MPP_Isc(irrad_temp_lists):
     total_list = []
     for irrad_temp_list in irrad_temp_lists:
@@ -396,14 +402,10 @@ def irrad_temp_to_MPP_Isc(irrad_temp_lists):
     return total_list
 
 
-# Constants for a deep cycle battery
-# I referenced a Duralast Deep Cycle Marine Battery for these numbers:
-# https://www.autozone.com/batteries-starting-and-charging/rv-battery/p/duralast-29dp-dl-group-29-deep-cycle-marine-and-rv-battery/95824_0_0
-AMP_HOUR = 65
-
 # Computes the expected charge time to fill a deep cycle battery
 def get_charge_time(I_sc):
     return AMP_HOUR / I_sc
+
 
 # Given the Isc and MPP, maps them to expeced charge times
 def MPP_Isc_to_charge_time(mpp_isc_lists):
@@ -418,7 +420,7 @@ def MPP_Isc_to_charge_time(mpp_isc_lists):
     return total_list
 
 
-# Plot the interpolated route with drive times labeled for each leg
+# Plot the interpolated route with drive times labeled for each trip leg
 def plot_final_time_map(coords, dot_size, states, times, month_str):
     # If given a list of lists, flatten it to a single list
     if (any(isinstance(coord, list) for coord in coords)):
@@ -473,12 +475,14 @@ def plot_final_time_map(coords, dot_size, states, times, month_str):
     plt.show()
 
 
+# Converts a month string to its number (1-12)
+# Works for the full month name (ie. "January") or the abreviation (ie. "Jan")
 def get_month_number(month_str):
     month_number = None
-    if (len(month_str) > 3):
+    if (len(month_str) > 3): # given a full month name
         datetime_object = datetime.datetime.strptime(month_str, "%B")
         month_number = datetime_object.month
-    else:
+    else: # given an abreviation
         datetime_object = datetime.datetime.strptime(month_str, "%b")
         month_number = datetime_object.month
     print("Computing for month of " + month_str + "\n")
@@ -491,28 +495,31 @@ def driver(url, month_str, do_plot):
     coordinates = parse_url(url)
     if do_plot:
         plot_coordinates(coordinates, BIG_DOT)
+
     coordinate_pairs = build_pairs(coordinates)
     granular_coordinates = interpolate(coordinate_pairs)
     if do_plot:
         plot_coords_with_lines(coordinates, BIG_DOT)
+
     state_map = coords_to_states(granular_coordinates)
     irrad_temp_map = state_to_irrad_temp(state_map, month_num)
     MPP_Isc_map = irrad_temp_to_MPP_Isc(irrad_temp_map)
     charge_times_map = MPP_Isc_to_charge_time(MPP_Isc_map)
-   
     if do_plot:
         plot_final_time_map(granular_coordinates, BIG_DOT, state_map, charge_times_map, month_str)
 
 
 # Code to parse command-line arguments 
-# Pass a random second argument if you want to skip the plotting part
+# Pass a random third argument if you want to skip the plotting part.  This is
+#   useful for testing.
+# Second arument is for specifying the month to use
 if len(sys.argv) > 1:
     print("=====")
     month_str = "July" # Default to July unless another month is indicated
     if (len(sys.argv) > 2):
         month_str = sys.argv[2]
     do_plot = True
-    if (len(sys.argv) > 3):
+    if (len(sys.argv) > 3): 
         do_plot = False
     driver(sys.argv[1], month_str, do_plot)
     print("Execution complete.")
